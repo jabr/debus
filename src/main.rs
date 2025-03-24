@@ -1,19 +1,22 @@
-/// A echo example.
-///
-/// Run the example and `nc 127.0.0.1 50002` in another shell.
-/// All your input will be echoed out.
+
+use core::net::{SocketAddr};
+use anyhow::{Result, anyhow};
+
 use monoio::io::{
-  Splitable,
-  OwnedReadHalf,
-  AsyncReadRent,
-  OwnedWriteHalf,
-  AsyncWriteRentExt,
+  AsyncBufReadExt, AsyncWriteRentExt, BufReader, OwnedReadHalf, OwnedWriteHalf, Splitable
 };
 use monoio::net::{TcpListener, TcpStream};
+use local_sync::mpsc::bounded::{channel, Tx, Rx};
 use async_broadcast::{broadcast, Sender, Receiver};
+
+struct Client {
+  net: TcpStream,
+  addr: SocketAddr,
+}
 
 #[monoio::main]
 async fn main() {
+    let (mut _s1, r1) = broadcast::<Vec<u8>>(5);
     let (mut send, recv) = broadcast::<Vec<u8>>(5);
     send.set_overflow(true);
     let recv = recv.deactivate();
@@ -25,8 +28,11 @@ async fn main() {
             Ok((stream, addr)) => {
                 println!("accepted a connection from {}", addr);
                 let (r, w) = stream.into_split();
+                let (tx, rx) = channel::<Vec<u8>>(100);
                 monoio::spawn(echo_in(r, send.clone()));
-                monoio::spawn(echo_out(w, recv.activate_cloned()));
+                monoio::spawn(relay(recv.activate_cloned(), tx.clone()));
+                monoio::spawn(relay(r1.clone(), tx.clone()));
+                monoio::spawn(echo_out(w, rx));
             }
             Err(e) => {
                 println!("accepted connection failed: {}", e);
@@ -36,46 +42,55 @@ async fn main() {
     }
 }
 
+async fn relay(
+  mut from: Receiver<Vec<u8>>,
+  to: Tx<Vec<u8>>
+) -> Result<()> {
+  loop {
+      // relay messages to local transit channel
+      let msg = from.recv().await?;
+      to.send(msg).await
+        .map_err(|err| { anyhow!("{:?}", err) })?;
+  }
+}
+
 async fn echo_in(
-  mut stream: OwnedReadHalf<TcpStream>,
+  stream: OwnedReadHalf<TcpStream>,
   send: Sender<Vec<u8>>
 ) -> std::io::Result<()> {
-    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-    let mut res;
+    let addr = stream.peer_addr();
+    let mut reader = BufReader::new(stream);
     loop {
-        // read
-        (res, buf) = stream.read(buf).await;
-        if res? == 0 {
+        // read line
+        let mut buffer = Vec::new();
+        let res = reader.read_until(b'\n', &mut buffer).await;
+        let count = res?;
+        if count == 0 {
             return Ok(());
         }
 
-        println!("in {:?} from {:?}", buf, stream.peer_addr());
+        println!("in {} {:?} from {:?}", count, buffer, addr);
 
         // broadcast
-        let res = send.broadcast(buf.clone()).await;
+        let res = send.broadcast(buffer).await;
         if res.is_err() {
           println!("problem broadcasting");
         }
-
-        // clear
-        buf.clear();
     }
 }
 
 async fn echo_out(
   mut stream: OwnedWriteHalf<TcpStream>,
-  mut recv: Receiver<Vec<u8>>
+  mut rx: Rx<Vec<u8>>
 ) -> std::io::Result<()> {
+    let addr = stream.peer_addr();
     loop {
         // wait for input from socket or broadcast channel
-        if let Ok(buf) = recv.recv().await {
-          println!("out {:?} to {:?}", buf, stream.peer_addr());
+        if let Some(msg) = rx.recv().await {
+          println!("out {:?} to {:?}", msg, addr);
           // write all
-          let (res, mut buf) = stream.write_all(buf).await;
+          let (res, _) = stream.write_all(msg).await;
           res?;
-
-          // clear
-          buf.clear();
         }
     }
 }
