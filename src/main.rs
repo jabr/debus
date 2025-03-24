@@ -1,5 +1,4 @@
 
-use core::net::{SocketAddr};
 use anyhow::{Result, anyhow};
 
 use monoio::io::{
@@ -9,15 +8,15 @@ use monoio::net::{TcpListener, TcpStream};
 use local_sync::mpsc::bounded::{channel, Tx, Rx};
 use async_broadcast::{broadcast, Sender, Receiver};
 
-struct Client {
-  net: TcpStream,
-  addr: SocketAddr,
-}
+type Entry = Vec<u8>;
+
+mod channels;
+mod client;
 
 #[monoio::main]
 async fn main() {
-    let (mut _s1, r1) = broadcast::<Vec<u8>>(5);
-    let (mut send, recv) = broadcast::<Vec<u8>>(5);
+    let (mut _s1, r1) = broadcast::<Entry>(5);
+    let (mut send, recv) = broadcast::<Entry>(5);
     send.set_overflow(true);
     let recv = recv.deactivate();
     let listener = TcpListener::bind("127.0.0.1:50002").unwrap();
@@ -28,7 +27,7 @@ async fn main() {
             Ok((stream, addr)) => {
                 println!("accepted a connection from {}", addr);
                 let (r, w) = stream.into_split();
-                let (tx, rx) = channel::<Vec<u8>>(100);
+                let (tx, rx) = channel::<Entry>(100);
                 monoio::spawn(echo_in(r, send.clone()));
                 monoio::spawn(relay(recv.activate_cloned(), tx.clone()));
                 monoio::spawn(relay(r1.clone(), tx.clone()));
@@ -43,8 +42,8 @@ async fn main() {
 }
 
 async fn relay(
-  mut from: Receiver<Vec<u8>>,
-  to: Tx<Vec<u8>>
+  mut from: Receiver<Entry>,
+  to: Tx<Entry>
 ) -> Result<()> {
   loop {
       // relay messages to local transit channel
@@ -56,7 +55,7 @@ async fn relay(
 
 async fn echo_in(
   stream: OwnedReadHalf<TcpStream>,
-  send: Sender<Vec<u8>>
+  send: Sender<Entry>
 ) -> std::io::Result<()> {
     let addr = stream.peer_addr();
     let mut reader = BufReader::new(stream);
@@ -81,7 +80,7 @@ async fn echo_in(
 
 async fn echo_out(
   mut stream: OwnedWriteHalf<TcpStream>,
-  mut rx: Rx<Vec<u8>>
+  mut rx: Rx<Entry>
 ) -> std::io::Result<()> {
     let addr = stream.peer_addr();
     loop {
