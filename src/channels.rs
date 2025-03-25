@@ -29,13 +29,13 @@ fn create(name: &str) -> Channel {
   return Channel::Topic { sender, receiver: receiver.deactivate() }
 }
 
-enum Subscription {
+pub enum Subscription {
   Topic(async_broadcast::Receiver<Entry>),
   Queue(async_channel::Receiver<Entry>),
 }
 
 impl Subscription {
-  async fn recv(&mut self) -> Result<Entry> {
+  pub async fn recv(&mut self) -> Result<Entry> {
     match self {
       Self::Topic(receiver) => {
         receiver.recv().await
@@ -56,13 +56,13 @@ impl Subscription {
   }
 }
 
-enum Publisher {
+pub enum Publisher {
   Topic(async_broadcast::Sender<Entry>),
   Queue(async_channel::Sender<Entry>),
 }
 
 impl Publisher {
-  async fn send(&self, entry: Entry) -> Result<()> {
+  pub async fn send(&self, entry: Entry) -> Result<()> {
     match self {
       Self::Topic(sender) => {
         match sender.broadcast(entry).await {
@@ -140,23 +140,23 @@ pub struct Channels {
 }
 
 impl Channels {
-  fn new() -> Self {
+  pub fn new() -> Self {
     Self { map: HashMap::new() }
   }
 
-  fn subscribe(&self, name: &str) -> Subscription {
+  pub fn subscribe(&self, name: &str) -> Subscription {
     return self.map.pin()
       .get_or_insert_with(name.to_string(), || create(name))
       .subscribe();
   }
 
-  fn publisher(&self, name: &str) -> Publisher {
+  pub fn publisher(&self, name: &str) -> Publisher {
     return self.map.pin()
       .get_or_insert_with(name.to_string(), || create(&name))
       .publisher();
   }
 
-  fn prune(&self) {
+  pub fn prune(&self) {
     let g = self.map.guard();
     for (name, channel) in self.map.iter(&g) {
       if !channel.active() {

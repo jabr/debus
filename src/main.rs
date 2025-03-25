@@ -6,19 +6,17 @@ use monoio::io::{
 };
 use monoio::net::{TcpListener, TcpStream};
 use local_sync::mpsc::bounded::{channel, Tx, Rx};
-use async_broadcast::{broadcast, Sender, Receiver};
 
 type Entry = Vec<u8>;
 
-mod channels;
 mod client;
+
+mod channels;
+use channels::{Channels, Publisher, Subscription};
 
 #[monoio::main]
 async fn main() {
-    let (mut _s1, r1) = broadcast::<Entry>(5);
-    let (mut send, recv) = broadcast::<Entry>(5);
-    send.set_overflow(true);
-    let recv = recv.deactivate();
+    let channels = Channels::new();
     let listener = TcpListener::bind("127.0.0.1:50002").unwrap();
     println!("listening");
     loop {
@@ -28,9 +26,9 @@ async fn main() {
                 println!("accepted a connection from {}", addr);
                 let (r, w) = stream.into_split();
                 let (tx, rx) = channel::<Entry>(100);
-                monoio::spawn(echo_in(r, send.clone()));
-                monoio::spawn(relay(recv.activate_cloned(), tx.clone()));
-                monoio::spawn(relay(r1.clone(), tx.clone()));
+                monoio::spawn(echo_in(r, channels.publisher("*")));
+                monoio::spawn(relay(channels.subscribe("*"), tx.clone()));
+                monoio::spawn(relay(channels.subscribe("oob"), tx.clone()));
                 monoio::spawn(echo_out(w, rx));
             }
             Err(e) => {
@@ -42,7 +40,7 @@ async fn main() {
 }
 
 async fn relay(
-  mut from: Receiver<Entry>,
+  mut from: Subscription,
   to: Tx<Entry>
 ) -> Result<()> {
   loop {
@@ -55,7 +53,7 @@ async fn relay(
 
 async fn echo_in(
   stream: OwnedReadHalf<TcpStream>,
-  send: Sender<Entry>
+  publisher: Publisher
 ) -> std::io::Result<()> {
     let addr = stream.peer_addr();
     let mut reader = BufReader::new(stream);
@@ -71,7 +69,7 @@ async fn echo_in(
         println!("in {} {:?} from {:?}", count, buffer, addr);
 
         // broadcast
-        let res = send.broadcast(buffer).await;
+        let res = publisher.send(buffer).await;
         if res.is_err() {
           println!("problem broadcasting");
         }
