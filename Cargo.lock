@@ -89,6 +89,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "debus"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-broadcast",
+ "async-channel",
+ "futures-lite",
+ "local-sync",
+ "monoio",
+ "papaya",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -291,19 +304,6 @@ checksum = "6827e3fc394523c21d4464d02c0bb1c19966ea4a58a9844ad6d746214179d2bc"
 dependencies = [
  "equivalent",
  "seize",
-]
-
-[[package]]
-name = "papyrus"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-broadcast",
- "async-channel",
- "futures-lite",
- "local-sync",
- "monoio",
- "papaya",
 ]
 
 [[package]]
