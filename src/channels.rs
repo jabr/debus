@@ -48,7 +48,14 @@ impl Subscription {
     }
   }
 
-  fn close(&mut self) -> bool {
+  pub fn is_closed(&self) -> bool {
+    match self {
+      Self::Topic(receiver) => { receiver.is_closed() }
+      Self::Queue(receiver) => { receiver.is_closed() }
+    }
+  }
+
+  pub fn close(&self) -> bool {
     match self {
       Self::Topic(receiver) => { receiver.close() }
       Self::Queue(receiver) => { receiver.close() }
@@ -79,7 +86,14 @@ impl Publisher {
     }
   }
 
-  fn close(&self) -> bool {
+  pub fn is_closed(&self) -> bool {
+    match self {
+      Self::Topic(sender) => { sender.is_closed() }
+      Self::Queue(sender) => { sender.is_closed() }
+    }
+  }
+
+  pub fn close(&self) -> bool {
     match self {
       Self::Topic(sender) => { sender.close() }
       Self::Queue(sender) => { sender.close() }

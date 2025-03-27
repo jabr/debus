@@ -1,4 +1,3 @@
-
 use anyhow::{Result, anyhow};
 
 use monoio::io::{
@@ -7,17 +6,16 @@ use monoio::io::{
 use monoio::net::{TcpListener, TcpStream};
 use local_sync::mpsc::bounded::{channel, Tx, Rx};
 
-type Entry = Vec<u8>;
-
 mod client;
-
 mod channels;
 use channels::{Channels, Publisher, Subscription};
+
+type Entry = Vec<u8>;
 
 #[monoio::main]
 async fn main() {
     let channels = Channels::new();
-    let listener = TcpListener::bind("127.0.0.1:50002").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:8115").unwrap();
     println!("listening");
     loop {
         let incoming = listener.accept().await;
