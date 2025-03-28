@@ -9,5 +9,5 @@ async-broadcast = "0.7.2"
 async-channel = "2.3.1"
 futures-lite = "2.6.0"
 local-sync = "0.1.1"
-monoio = "0.2.4"
+monoio = { version = "0.2.4", features = ["sync"] }
 papaya = "0.2.1"

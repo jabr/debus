@@ -149,9 +149,12 @@ impl Channel {
   }
 }
 
+
 pub struct Channels {
   map: HashMap<String, Channel>,
 }
+
+unsafe impl Sync for Channels {}
 
 impl Channels {
   pub fn new() -> Self {

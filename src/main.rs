@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 
+use monoio;
 use monoio::io::{
   AsyncBufReadExt, AsyncWriteRentExt, BufReader, OwnedReadHalf, OwnedWriteHalf, Splitable
 };
@@ -12,16 +13,55 @@ use channels::{Channels, Publisher, Subscription};
 
 type Entry = Vec<u8>;
 
-#[monoio::main]
-async fn main() {
-    let channels = Channels::new();
+use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+use std::time::Duration;
+
+fn next_id() -> usize {
+  static COUNTER: AtomicUsize = AtomicUsize::new(1);
+  return COUNTER.fetch_add(1, Ordering::Relaxed);
+}
+
+fn runtime() -> monoio::RuntimeBuilder<monoio::LegacyDriver> {
+  monoio::RuntimeBuilder::<monoio::LegacyDriver>::new()
+}
+
+fn main() {
+  let cores = thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+  println!("total cores = {}", cores);
+  let channels = Arc::new(Channels::new());
+
+  let threads: Vec<_> = (1 .. cores).map(|i| {
+    let tc = channels.clone();
+    thread::spawn(|| {
+      runtime().build().expect("Failed building the Runtime")
+        .block_on(thread(tc));
+    })
+  }).collect();
+
+  runtime().build().expect("Failed building the Runtime")
+    .block_on(thread(channels));
+
+  threads.into_iter().for_each(|t| {
+    let _ = t.join();
+  });
+}
+
+async fn thread(channels: Arc<Channels>) {
+  let thread_id = thread::current().id();
+  let thread_count = next_id() as u64;
+  println!("thread {:?} ({})", thread_id, thread_count);
+  thread::sleep(Duration::from_secs(1u64 * thread_count));
+
     let listener = TcpListener::bind("127.0.0.1:8115").unwrap();
     println!("listening");
     loop {
         let incoming = listener.accept().await;
         match incoming {
             Ok((stream, addr)) => {
-                println!("accepted a connection from {}", addr);
+                println!("accepted a connection from {} on {:?}", addr, thread_id);
                 let (r, w) = stream.into_split();
                 let (tx, rx) = channel::<Entry>(100);
                 monoio::spawn(echo_in(r, channels.publisher("*")));
