@@ -9,7 +9,7 @@ use local_sync::mpsc::bounded::{channel, Tx, Rx};
 
 mod client;
 mod channels;
-use channels::{Channels, Publisher, Subscription};
+use channels::{Channels, Publisher, Subscription, Publishers};
 
 type Entry = Vec<u8>;
 
@@ -33,7 +33,7 @@ fn main() {
   println!("total cores = {}", cores);
   let channels = Arc::new(Channels::new());
 
-  let threads: Vec<_> = (1 .. cores).map(|i| {
+  let threads: Vec<_> = (1 .. cores).map(|_i| {
     let tc = channels.clone();
     thread::spawn(|| {
       runtime().build().expect("Failed building the Runtime")
@@ -52,6 +52,7 @@ fn main() {
 async fn thread(channels: Arc<Channels>) {
   let thread_id = thread::current().id();
   let thread_count = next_id() as u64;
+  let _publishers = RefCell::new(Publishers::new(channels.clone()));
   println!("thread {:?} ({})", thread_id, thread_count);
   thread::sleep(Duration::from_secs(1u64 * thread_count));
 
@@ -62,6 +63,10 @@ async fn thread(channels: Arc<Channels>) {
         match incoming {
             Ok((stream, addr)) => {
                 println!("accepted a connection from {} on {:?}", addr, thread_id);
+
+                // @todo: use client impl
+                // start_client(stream, addr, channel, publishers)
+
                 let (r, w) = stream.into_split();
                 let (tx, rx) = channel::<Entry>(100);
                 monoio::spawn(echo_in(r, channels.publisher("*")));

@@ -1,11 +1,15 @@
 use super::Entry;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Instant, Duration};
+
 use anyhow::{Result, anyhow};
 
 use async_broadcast;
 use async_channel;
 
-use papaya::HashMap;
+use papaya::HashMap as PapayaMap;
 
 enum Channel {
   Topic {
@@ -149,16 +153,15 @@ impl Channel {
   }
 }
 
-
 pub struct Channels {
-  map: HashMap<String, Channel>,
+  map: PapayaMap<String, Channel>,
 }
 
 unsafe impl Sync for Channels {}
 
 impl Channels {
   pub fn new() -> Self {
-    Self { map: HashMap::new() }
+    Self { map: PapayaMap::new() }
   }
 
   pub fn subscribe(&self, name: &str) -> Subscription {
@@ -180,6 +183,39 @@ impl Channels {
         channel.close();
         self.map.remove(name, &g);
       }
+    }
+  }
+}
+
+// each thread has one shared publishers
+pub struct Publishers {
+  channels: Arc<Channels>,
+  active: HashMap<String, (Publisher, Instant)>
+}
+
+impl Publishers {
+  pub fn new(channels: Arc<Channels>) -> Self {
+    Self { channels, active: HashMap::new() }
+  }
+
+  pub fn channel(&mut self, name: &str) -> &Publisher {
+    return &self.active.entry(name.to_string())
+      .and_modify(|(_, instant)| *instant = Instant::now())
+      .or_insert_with(||
+        (self.channels.publisher(name), Instant::now())
+      ).0;
+  }
+
+  pub fn prune(&mut self) {
+    const EXPIRE: Duration = Duration::from_secs(60);
+    let initial_count = self.active.len();
+    self.active.retain(|_, (publisher, last_used)| {
+      if last_used.elapsed() < EXPIRE { return true; }
+      publisher.close();
+      return false;
+    });
+    if self.active.len() < initial_count {
+      self.channels.prune();
     }
   }
 }

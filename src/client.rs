@@ -1,4 +1,4 @@
-use super::{Entry, channels::{Channels, Subscription}};
+use super::{Entry, channels::{Channels, Subscription, Publishers}};
 
 use core::net::SocketAddr;
 use std::cell::RefCell;
@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use anyhow::Result;
 use monoio::net::TcpStream;
 use monoio::io::{
   AsyncBufReadExt,
@@ -24,6 +25,7 @@ fn next_id() -> usize {
 
 struct Client {
   channels: Channels,
+  publishers: RefCell<Publishers>,
   id: usize,
   addr: SocketAddr,
   stream: BufReader<OwnedReadHalf<TcpStream>>,
@@ -44,8 +46,9 @@ impl Client {
     }
   }
 
-  fn publish(&self, name: &str, data: &Entry) {
-    // threadlocal lookup for publisher
+  async fn publish(&self, name: &str, data: Entry) -> Result<()> {
+    return self.publishers.borrow_mut()
+      .channel(name).send(data).await;
   }
 
   async fn serve(&mut self) {
@@ -69,7 +72,8 @@ impl Client {
 pub fn start_client(
   stream: TcpStream,
   addr: SocketAddr,
-  channels: Channels
+  channels: Channels,
+  publishers: RefCell<Publishers>
 ) {
   let (stream_read, stream_write) = stream.into_split();
   let (channel_tx, channel_rx) = channel::<Entry>(100);
@@ -82,7 +86,7 @@ pub fn start_client(
       stream: BufReader::new(stream_read),
       out: channel_tx,
       subscriptions: HashMap::new(),
-      channels,
+      channels, publishers,
     };
 
     client.serve().await;
