@@ -206,7 +206,7 @@ impl Publishers {
       ).0;
   }
 
-  pub fn prune(&mut self) {
+  pub fn prune(&mut self) -> bool {
     const EXPIRE: Duration = Duration::from_secs(60);
     let initial_count = self.active.len();
     self.active.retain(|_, (publisher, last_used)| {
@@ -214,8 +214,6 @@ impl Publishers {
       publisher.close();
       return false;
     });
-    if self.active.len() < initial_count {
-      self.channels.prune();
-    }
+    return self.active.len() < initial_count;
   }
 }

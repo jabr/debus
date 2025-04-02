@@ -4,6 +4,7 @@ use core::net::SocketAddr;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
@@ -24,8 +25,8 @@ fn next_id() -> usize {
 }
 
 struct Client {
-  channels: Channels,
-  publishers: RefCell<Publishers>,
+  channels: Arc<Channels>,
+  publishers: Rc<RefCell<Publishers>>,
   id: usize,
   addr: SocketAddr,
   stream: BufReader<OwnedReadHalf<TcpStream>>,
@@ -60,10 +61,10 @@ impl Client {
         println!("in {} {:?} from {:?}", count, buffer, self.addr);
 
         // broadcast
-        // let res = publisher.send(buffer).await;
-        // if res.is_err() {
-        //   println!("problem broadcasting");
-        // }
+        let res = self.publish("*", buffer).await;
+        if res.is_err() {
+          println!("problem broadcasting");
+        }
       } else { break; }
     }
   }
@@ -72,8 +73,8 @@ impl Client {
 pub fn start_client(
   stream: TcpStream,
   addr: SocketAddr,
-  channels: Channels,
-  publishers: RefCell<Publishers>
+  channels: Arc<Channels>,
+  publishers: Rc<RefCell<Publishers>>
 ) {
   let (stream_read, stream_write) = stream.into_split();
   let (channel_tx, channel_rx) = channel::<Entry>(100);
@@ -89,6 +90,7 @@ pub fn start_client(
       channels, publishers,
     };
 
+    client.subscribe("*");
     client.serve().await;
   });
 }
