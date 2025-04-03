@@ -47,7 +47,10 @@ impl Subscription {
       }
       Self::Queue(receiver) => {
         receiver.recv().await
-          .map_err(|err| anyhow!("{:?}", err))
+          .map_err(|err| {
+            println!("sub recv error {:?}", err);
+            anyhow!("{:?}", err)
+          })
       }
     }
   }
@@ -84,7 +87,9 @@ impl Publisher {
       Self::Queue(sender) => {
         match sender.send(entry).await {
           Ok(_) => { Ok(()) }
-          Err(err) => { Err(anyhow!("{:?}", err)) }
+          Err(err) => {
+            println!("pub send error {:?}", err);
+            Err(anyhow!("{:?}", err)) }
         }
       }
     }

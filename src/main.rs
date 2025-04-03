@@ -72,7 +72,7 @@ async fn thread(channels: Arc<Channels>) {
   println!("thread {:?} ({})", thread_id, thread_count);
   thread::sleep(Duration::from_secs(1u64 * thread_count));
 
-  monoio::spawn(prune(channels.clone(), publishers.clone()));
+  // monoio::spawn(prune(channels.clone(), publishers.clone()));
 
   let listener = TcpListener::bind("127.0.0.1:8115").unwrap();
   println!("listening");
