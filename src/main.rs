@@ -1,16 +1,10 @@
-use anyhow::{Result, anyhow};
-
 use monoio;
-use monoio::io::{
-  AsyncBufReadExt, AsyncWriteRentExt, BufReader, OwnedReadHalf, OwnedWriteHalf
-};
-use monoio::net::{TcpListener, TcpStream};
+use monoio::net::{TcpListener, ListenerOpts};
 use monoio::time;
-use local_sync::mpsc::bounded::{Tx, Rx};
 
 mod client;
 mod channels;
-use channels::{Channels, Publisher, Subscription, Publishers};
+use channels::{Channels, Publishers};
 
 type Entry = Vec<u8>;
 
@@ -19,7 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::thread::yield_now;
 
 fn next_id() -> usize {
   static COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -39,13 +33,16 @@ fn main() {
   let threads: Vec<_> = (1 .. cores).map(|_i| {
     let tc = channels.clone();
     thread::spawn(|| {
-      runtime().build().expect("Failed building the Runtime")
-        .block_on(thread(tc));
+      // runtime().build().expect("Failed building the Runtime")
+      //   .block_on(async move { thread(tc).await; });
+      monoio::start::<time::TimeDriver<monoio::LegacyDriver>, _>(async {
+        thread(tc).await;
+      });
     })
   }).collect();
 
-  runtime().build().expect("Failed building the Runtime")
-    .block_on(thread(channels));
+  // runtime().build().expect("Failed building the Runtime")
+  //   .block_on(thread(listener, channels));
 
   threads.into_iter().for_each(|t| {
     let _ = t.join();
@@ -70,23 +67,30 @@ async fn thread(channels: Arc<Channels>) {
   let thread_count = next_id() as u64;
   let publishers = Rc::new(RefCell::new(Publishers::new(channels.clone())));
   println!("thread {:?} ({})", thread_id, thread_count);
-  thread::sleep(Duration::from_secs(1u64 * thread_count));
+  // thread::sleep(Duration::from_secs(1u64 * thread_count));
 
   // monoio::spawn(prune(channels.clone(), publishers.clone()));
 
-  let listener = TcpListener::bind("127.0.0.1:8115").unwrap();
+  let listener = TcpListener::bind_with_config(
+    "127.0.0.1:8115",
+    &ListenerOpts::new().reuse_port(true).reuse_addr(true)
+  ).unwrap();
   println!("listening");
   loop {
     let incoming = listener.accept().await;
     match incoming {
       Ok((stream, addr)) => {
           println!("accepted a connection from {} on {:?}", addr, thread_id);
-          client::start_client(stream, addr, channels.clone(), publishers.clone())
+          client::start_client(stream, addr, channels.clone(), publishers.clone());
       }
       Err(e) => {
           println!("accepted connection failed: {}", e);
           return;
       }
     }
+    yield_now();
+    // thread::sleep(Duration::from_secs(10));
+    time::sleep(time::Duration::from_millis(10_000)).await;
+    yield_now();
   }
 }

@@ -3,8 +3,13 @@ use super::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, Duration};
+use std::thread;
+use std::cell::RefCell;
 
 use anyhow::{Result, anyhow};
+
+use monoio;
+use monoio::time;
 
 use async_broadcast;
 use async_channel;
@@ -62,10 +67,10 @@ impl Subscription {
     }
   }
 
-  pub fn close(&self) -> bool {
+  pub fn close(&mut self) {
     match self {
-      Self::Topic(receiver) => { receiver.close() }
-      Self::Queue(receiver) => { receiver.close() }
+      Self::Topic(receiver) => { drop(receiver); }
+      Self::Queue(receiver) => { drop(receiver); }
     }
   }
 }
@@ -85,7 +90,7 @@ impl Publisher {
         }
       }
       Self::Queue(sender) => {
-        match sender.send(entry).await {
+        match sender.force_send(entry) {
           Ok(_) => { Ok(()) }
           Err(err) => {
             println!("pub send error {:?}", err);
@@ -99,13 +104,6 @@ impl Publisher {
     match self {
       Self::Topic(sender) => { sender.is_closed() }
       Self::Queue(sender) => { sender.is_closed() }
-    }
-  }
-
-  pub fn close(&self) -> bool {
-    match self {
-      Self::Topic(sender) => { sender.close() }
-      Self::Queue(sender) => { sender.close() }
     }
   }
 }
@@ -144,16 +142,10 @@ impl Channel {
     }
   }
 
-  fn close(&self) {
+  fn close(&self) -> bool {
     match self {
-      Self::Topic { sender, receiver } => {
-        sender.close();
-        receiver.close();
-      }
-      Self::Queue { sender, receiver } => {
-        sender.close();
-        receiver.close();
-      }
+      Self::Topic { sender, receiver: _ } => { sender.close() }
+      Self::Queue { sender, receiver: _ } => { sender.close() }
     }
   }
 }
@@ -172,7 +164,7 @@ impl Channels {
   pub fn subscribe(&self, name: &str) -> Subscription {
     return self.map.pin()
       .get_or_insert_with(name.to_string(), || create(name))
-      .subscribe();
+      .subscribe()
   }
 
   pub fn publisher(&self, name: &str) -> Publisher {
@@ -214,10 +206,8 @@ impl Publishers {
   pub fn prune(&mut self) -> bool {
     const EXPIRE: Duration = Duration::from_secs(60);
     let initial_count = self.active.len();
-    self.active.retain(|_, (publisher, last_used)| {
-      if last_used.elapsed() < EXPIRE { return true; }
-      publisher.close();
-      return false;
+    self.active.retain(|_, (_, last_used)| {
+      last_used.elapsed() < EXPIRE
     });
     return self.active.len() < initial_count;
   }

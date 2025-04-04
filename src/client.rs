@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use futures::future::{AbortHandle, Abortable};
 use anyhow::Result;
 use monoio::net::TcpStream;
 use monoio::io::{
@@ -32,21 +33,27 @@ struct Client {
   addr: SocketAddr,
   stream: BufReader<OwnedReadHalf<TcpStream>>,
   out: Tx<Entry>,
-  subscriptions: HashMap<String, Rc<RefCell<Subscription>>>,
+  subscriptions: HashMap<String, AbortHandle>,
 }
 
 impl Client {
   fn subscribe(&mut self, name: &str) {
-    let subscription = Rc::new(RefCell::new(self.channels.subscribe(name)));
-    self.subscriptions.insert(name.to_string(), subscription.clone());
-
-    // @todo: remove subscription when it exits
-    monoio::spawn(relay(self.id, subscription.clone(), self.out.clone()));
+    let subscription = self.channels.subscribe(name);
+    let id = self.id;
+    let out = self.out.clone();
+    let (handler, registration) = AbortHandle::new_pair();
+    monoio::spawn(async move {
+      Abortable::new(
+        relay(id, subscription, out),
+        registration
+      ).await
+    });
+    self.subscriptions.insert(name.to_string(), handler);
   }
 
   fn unsubscribe(&mut self, name: &str) {
-    if let Some(subscription) = self.subscriptions.remove(name) {
-      subscription.borrow().close();
+    if let Some(handler) = self.subscriptions.remove(name) {
+      handler.abort();
     }
   }
 
@@ -62,6 +69,18 @@ impl Client {
       if let Ok(count) = self.stream.read_until(b'\n', &mut buffer).await {
         if count == 0 { break; }
         // println!("in {} {:?} from {:?}", count, buffer, self.addr);
+
+        if buffer.starts_with(&[b'+', b'-', b'-']) {
+          println!("{:} subscribing to q/*", self.id);
+          self.subscribe("q/*");
+          continue;
+        }
+
+        if buffer.starts_with(&[b'-', b'-', b'-']) {
+          println!("{:} unsubscribing to q/*", self.id);
+          self.unsubscribe("q/*");
+          continue;
+        }
 
         // broadcast
         let res = self.publish("q/*", buffer).await;
@@ -98,19 +117,18 @@ pub fn start_client(
       channels, publishers,
     };
 
-    client.subscribe("q/*");
     client.serve().await;
   });
 }
 
 async fn relay(
   id: usize,
-  from: Rc<RefCell<Subscription>>,
+  mut from: Subscription,
   to: Tx<Entry>
 ) -> () {
   // @todo: notify on error?
   loop {
-    if let Ok(msg) = from.borrow_mut().recv().await {
+    if let Ok(msg) = from.recv().await {
       let _res = to.send(msg).await;
       if _res.is_err() {
         println!("{:} relay to error {:?}", id, _res);
@@ -120,15 +138,13 @@ async fn relay(
         println!("{:} relay to closed", id);
         break;
       }
-    } else {
-      if from.borrow().is_closed() {
-        println!("{:} relay from closed", id);
-        break;
-      }
+    } else if from.is_closed() {
+      println!("{:} relay from closed", id);
+      break;
     }
   }
   println!("{:} relay exiting", id);
-  from.borrow().close();
+  drop(from);
   drop(to);
 }
 
@@ -148,7 +164,6 @@ async fn pipe_out(
     }
   }
   println!("{:} pipe_out exiting", id);
-  rx.close();
   drop(rx);
   drop(stream);
 }

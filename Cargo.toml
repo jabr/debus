@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0.97"
 async-broadcast = "0.7.2"
 async-channel = "2.3.1"
-futures-lite = "2.6.0"
+futures = "0.3.31"
 local-sync = "0.1.1"
 monoio = { version = "0.2.4", features = ["sync"] }
 papaya = "0.2.1"
